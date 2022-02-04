@@ -5,51 +5,33 @@ from typing import Dict, Tuple
 Mapping = Dict[str, int]
 
 
-def create_mappings(dataset_path: str) -> Tuple[Mapping, Mapping]:
-    """Creates separate mappings to indices for entities and relations."""
-    # counters to have entities/relations sorted from most frequent
-    entity_counter = Counter()
-    relation_counter = Counter()
-    with open(dataset_path, "r") as f:
-        for line in f:
-            # -1 to remove newline sign
-            head, relation, tail = line[:-1].split("\t")
-            entity_counter.update([head, tail])
-            relation_counter.update([relation])
-    entity2id = {}
-    relation2id = {}
-    for idx, (mid, _) in enumerate(entity_counter.most_common()):
-        entity2id[mid] = idx
-    for idx, (relation, _) in enumerate(relation_counter.most_common()):
-        relation2id[relation] = idx
-    return entity2id, relation2id
+def create_triples(datapath):
+  with open(datapath,"r") as f:
+    lines=f.readlines()
+    triples=[]
+    for line in lines:
+      triple=line.replace("\n","").split("\t")
+      triples.append(triple)
+
+  return triples
 
 
-class FB15KDataset(data.Dataset):
-    """Dataset implementation for handling FB15K and FB15K-237."""
+class PersonaTripleDataset(data.Dataset):
+  def __init__(self,ent_dict,rel_dict,triples):
+    self.ent2id=ent_dict
+    self.rel2id=rel_dict
+    self.triples=triples
 
-    def __init__(self, data_path: str, entity2id: Mapping, relation2id: Mapping):
-        self.entity2id = entity2id
-        self.relation2id = relation2id
-        with open(data_path, "r") as f:
-            # data in tuples (head, relation, tail)
-            self.data = [line[:-1].split("\t") for line in f]
 
-    def __len__(self):
-        """Denotes the total number of samples."""
-        return len(self.data)
+  def __len__(self):
+    return len(self.triples)
 
-    def __getitem__(self, index):
-        """Returns (head id, relation id, tail id)."""
-        head, relation, tail = self.data[index]
-        head_id = self._to_idx(head, self.entity2id)
-        relation_id = self._to_idx(relation, self.relation2id)
-        tail_id = self._to_idx(tail, self.entity2id)
-        return head_id, relation_id, tail_id
 
-    @staticmethod
-    def _to_idx(key: str, mapping: Mapping) -> int:
-        try:
-            return mapping[key]
-        except KeyError:
-            return len(mapping)
+  def __getitem__(self,idx):
+    h,r,t=self.triples[idx]
+
+    h_id=self.ent2id[h]
+    r_id=self.rel2id[r]
+    t_id=self.ent2id[t]
+
+    return h_id,r_id,t_id

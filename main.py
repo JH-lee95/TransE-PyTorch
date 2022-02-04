@@ -10,13 +10,17 @@ import torch.optim as optim
 from torch.utils import data as torch_data
 from torch.utils import tensorboard
 from typing import Tuple
+import json
+
+
+from transformers import BartForConditionalGeneration, BartTokenizer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_float("lr", default=0.01, help="Learning rate value.")
 flags.DEFINE_integer("seed", default=1234, help="Seed value.")
 flags.DEFINE_integer("batch_size", default=128, help="Maximum batch size.")
 flags.DEFINE_integer("validation_batch_size", default=64, help="Maximum batch size during model validation.")
-flags.DEFINE_integer("vector_length", default=50, help="Length of entity/relation vector.")
+flags.DEFINE_integer("vector_length", default=1024, help="Length of entity/relation vector.")
 flags.DEFINE_float("margin", default=1.0, help="Margin value in margin-based ranking loss.")
 flags.DEFINE_integer("norm", default=1, help="Norm used for calculating dissimilarity metric (usually 1 or 2).")
 flags.DEFINE_integer("epochs", default=2000, help="Number of training epochs.")
@@ -87,12 +91,29 @@ def main(_):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    path = FLAGS.dataset_path
-    train_path = os.path.join(path, "train.txt")
-    validation_path = os.path.join(path, "valid.txt")
-    test_path = os.path.join(path, "test.txt")
 
-    entity2id, relation2id = data.create_mappings(train_path)
+    tokenizer = BartTokenizer.from_pretrained("facebook/bart-large")
+    lm = BartForConditionalGeneration.from_pretrained("facebook/bart-large", forced_bos_token_id=0)
+
+    path = FLAGS.dataset_path
+    train_path = os.path.join(path, "persona_train_all.txt")
+    # validation_path = os.path.join(path, "persona_train_all.txt")
+    #test_path = os.path.join(path, "test.txt")
+
+    ent_dict_path=os.path.join(path,"entities.dict")
+    rel_dict_path=os.path.join(path,"relation.dict")
+
+    with open(ent_dict_path,"r") as f1:
+      entity2id=json.load(f1)
+
+    with open(rel_dict_path,"r") as f2:
+      relation2id=json.load(f2)
+
+
+    id2entity={v:k for k,v in entity2id.items()}
+    id2relation={v:k for k,v in relation2id.items()}
+
+    triples=data.create_triples(train_path)
 
     batch_size = FLAGS.batch_size
     vector_length = FLAGS.vector_length
@@ -102,14 +123,14 @@ def main(_):
     epochs = FLAGS.epochs
     device = torch.device('cuda') if FLAGS.use_gpu else torch.device('cpu')
 
-    train_set = data.FB15KDataset(train_path, entity2id, relation2id)
+    train_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
     train_generator = torch_data.DataLoader(train_set, batch_size=batch_size)
-    validation_set = data.FB15KDataset(validation_path, entity2id, relation2id)
+    validation_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
     validation_generator = torch_data.DataLoader(validation_set, batch_size=FLAGS.validation_batch_size)
-    test_set = data.FB15KDataset(test_path, entity2id, relation2id)
-    test_generator = torch_data.DataLoader(test_set, batch_size=FLAGS.validation_batch_size)
+    test_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
+    test_generator = torch_data.DataLoader(validation_set, batch_size=FLAGS.validation_batch_size)
 
-    model = model_definition.TransE(entity_count=len(entity2id), relation_count=len(relation2id), dim=vector_length,
+    model = model_definition.TransW(entity_count=len(entity2id), relation_count=len(relation2id),lm=lm,tokenizer=tokenizer,id2entity=id2entity,id2relation=id2relation, dim=vector_length,
                                     margin=margin,
                                     device=device, norm=norm)  # type: torch.nn.Module
     model = model.to(device)
@@ -132,9 +153,9 @@ def main(_):
         samples_count = 0
         model.train()
 
-        for local_heads, local_relations, local_tails in train_generator:
-            local_heads, local_relations, local_tails = (local_heads.to(device), local_relations.to(device),
-                                                         local_tails.to(device))
+        for h_id,r_id,t_id in train_generator:
+            local_heads, local_relations, local_tails = (h_id.to(device), r_id.to(device),
+                                                         t_id.to(device))
 
             positive_triples = torch.stack((local_heads, local_relations, local_tails), dim=1)
 
