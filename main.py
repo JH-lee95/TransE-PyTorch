@@ -11,6 +11,7 @@ from torch.utils import data as torch_data
 from torch.utils import tensorboard
 from typing import Tuple
 import json
+from tqdm import tqdm
 
 
 from transformers import BartForConditionalGeneration, BartTokenizer
@@ -18,12 +19,12 @@ from transformers import BartForConditionalGeneration, BartTokenizer
 FLAGS = flags.FLAGS
 flags.DEFINE_float("lr", default=0.01, help="Learning rate value.")
 flags.DEFINE_integer("seed", default=1234, help="Seed value.")
-flags.DEFINE_integer("batch_size", default=128, help="Maximum batch size.")
-flags.DEFINE_integer("validation_batch_size", default=64, help="Maximum batch size during model validation.")
+flags.DEFINE_integer("batch_size", default=256, help="Maximum batch size.")
+flags.DEFINE_integer("validation_batch_size", default=128, help="Maximum batch size during model validation.")
 flags.DEFINE_integer("vector_length", default=1024, help="Length of entity/relation vector.")
 flags.DEFINE_float("margin", default=1.0, help="Margin value in margin-based ranking loss.")
 flags.DEFINE_integer("norm", default=1, help="Norm used for calculating dissimilarity metric (usually 1 or 2).")
-flags.DEFINE_integer("epochs", default=2000, help="Number of training epochs.")
+flags.DEFINE_integer("epochs", default=500, help="Number of training epochs.")
 flags.DEFINE_string("dataset_path", default="./synth_data", help="Path to dataset.")
 flags.DEFINE_bool("use_gpu", default=True, help="Flag enabling gpu usage.")
 flags.DEFINE_integer("validation_freq", default=10, help="Validate model every X epochs.")
@@ -97,8 +98,8 @@ def main(_):
 
     path = FLAGS.dataset_path
     train_path = os.path.join(path, "persona_train_all.txt")
-    # validation_path = os.path.join(path, "persona_train_all.txt")
-    #test_path = os.path.join(path, "test.txt")
+    validation_path = os.path.join(path, "persona_valid.txt")
+    test_path = os.path.join(path, "persona_test.txt")
 
     ent_dict_path=os.path.join(path,"entities.dict")
     rel_dict_path=os.path.join(path,"relation.dict")
@@ -113,7 +114,9 @@ def main(_):
     id2entity={v:k for k,v in entity2id.items()}
     id2relation={v:k for k,v in relation2id.items()}
 
-    triples=data.create_triples(train_path)
+    train_triples=data.create_triples(train_path)
+    valid_triples=data.create_triples(validation_path)
+    test_triples=data.create_triples(test_path)
 
     batch_size = FLAGS.batch_size
     vector_length = FLAGS.vector_length
@@ -123,11 +126,11 @@ def main(_):
     epochs = FLAGS.epochs
     device = torch.device('cuda') if FLAGS.use_gpu else torch.device('cpu')
 
-    train_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
+    train_set = data.PersonaTripleDataset(entity2id, relation2id, train_triples)
     train_generator = torch_data.DataLoader(train_set, batch_size=batch_size)
-    validation_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
+    validation_set = data.PersonaTripleDataset(entity2id, relation2id, valid_triples)
     validation_generator = torch_data.DataLoader(validation_set, batch_size=FLAGS.validation_batch_size)
-    test_set = data.PersonaTripleDataset(entity2id, relation2id, triples)
+    test_set = data.PersonaTripleDataset(entity2id, relation2id, test_triples)
     test_generator = torch_data.DataLoader(validation_set, batch_size=FLAGS.validation_batch_size)
 
     model = model_definition.TransW(entity_count=len(entity2id), relation_count=len(relation2id),lm=lm,tokenizer=tokenizer,id2entity=id2entity,id2relation=id2relation, dim=vector_length,
@@ -147,13 +150,13 @@ def main(_):
     print(model)
 
     # Training loop
-    for epoch_id in range(start_epoch_id, epochs + 1):
+    for epoch_id in tqdm(range(start_epoch_id, epochs + 1),desc="Epoch"):
         print("Starting epoch: ", epoch_id)
         loss_impacting_samples_count = 0
         samples_count = 0
         model.train()
 
-        for h_id,r_id,t_id in train_generator:
+        for h_id,r_id,t_id in tqdm(train_generator,desc="Batch Input"):
             local_heads, local_relations, local_tails = (h_id.to(device), r_id.to(device),
                                                          t_id.to(device))
 

@@ -26,7 +26,6 @@ class PersonaTripleDataset(data.Dataset):
   def __len__(self):
     return len(self.triples)
 
-
   def __getitem__(self,idx):
     h,r,t=self.triples[idx]
 
